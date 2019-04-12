@@ -1,5 +1,5 @@
 # lldb script from https://github.com/ryaoi/lldb-peda
-## with slight modify now
+#### with slight modify now
 
 #### I like to add these code in .lldbinit:
 ```
