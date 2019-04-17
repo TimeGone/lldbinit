@@ -1,4 +1,6 @@
 import binascii
+import struct
+import re
 import lldb
 
 def reverse(debugger, command, result, internal_dict):
@@ -74,22 +76,6 @@ def print_reg(process, register, ntimes):
             print(binascii.hexlify(content[::-1])),  # use [::-1] to reverse string
     print('')
 
-# def print_reg(process, register, ntimes):
-#     print("%13.13s" % ('\033[35m' + register.GetName() + "\033[0m ")),  # use format to print r8 and r9 pretty
-#     print('\033[36m' + register.GetValue() + '\033[0m' + ' '),
-#     addr = int(register.GetValue(), 16)
-
-#     error = lldb.SBError()
-#     for i in range(ntimes):
-#         content = process.ReadPointerFromMemory(addr, error)
-#         if error.Success():
-#             # print(binascii.hexlify(content[::-1])),  # use [::-1] to reverse string
-#             print('0x%016x' % content),
-#         addr = addr + 8
-#         if addr >= 2**64:
-#             break
-#     print('')
-
 def show_regs(debugger, command, result, internal_dict):
     print('\033[33m[----------------------------------------------------------------------------registers-------------------------------------------------------------------------]\033[0m')
     target = debugger.GetSelectedTarget()
@@ -126,13 +112,6 @@ def show_regs(debugger, command, result, internal_dict):
                 else:
                     # import pdb; pdb.set_trace()
                     print_reg(process, child, 8)
-                    # arrow = find_value(process, child.GetValue())
-                    # if any(arrow):
-                    #     print('\033[92m' + child.GetName() + "\033[0m: " + " --> ".join(arrow))
-                    # else:
-                    #     print('\033[92m' + child.GetName() + "\033[0m: " + child.GetValue())
-
-    # print('\033[33m[------------------------------------------]\033[0m')
 
 def print_ptr(debugger, command, result, internal_dict):
     target = debugger.GetSelectedTarget()
@@ -147,17 +126,22 @@ def print_ptr(debugger, command, result, internal_dict):
             break
         ptr1 = process.ReadPointerFromMemory(addr, error)
         addr = addr + 8
-        if error.Success():
+        if not error.Success():
+            break
+        else:
             hex_ptr = '0x%016x' % ptr1
-            print('\033[35m'+ hex_ptr +'\033[0m')
+            print('\033[35m'+ hex_ptr +'\033[0m'),
             for j in range(8):
                 if ptr1 >= 2**64:
                     break
                 ptr2 = process.ReadPointerFromMemory(ptr1, error)
-                ptr1 = ptr1 + 8
-                if error.Success():
+                if not error.Success():
+                    print re.sub('[\x00-\x1f\x7f-\xff]', '.', struct.pack('Q', ptr1))      # replace unprintable chars with '.' and print
+                    break
+                else:
+                    ptr1 = ptr1 + 8
                     if j == 0:
-                        print('-->'),
+                        print('\n-->'),
                     else:
                         print('   '),
                     hex_ptr = '0x%016x' % ptr2
@@ -166,8 +150,11 @@ def print_ptr(debugger, command, result, internal_dict):
                         if ptr2 >= 2**64:
                             break
                         ptr3 = process.ReadPointerFromMemory(ptr2, error)
-                        ptr2 = ptr2 + 8
-                        if error.Success():
+                        if not error.Success():
+                            print re.sub('[^\x20-\x7e]', '.', struct.pack('Q', ptr2)),
+                            break
+                        else:
+                            ptr2 = ptr2 + 8
                             if k == 0: print('->>'),
                             print('0x%016x' % ptr3),
                     print('')
@@ -192,14 +179,14 @@ def peda(debugger, command, result, internal_dict):
     stack(debugger, command, result, internal_dict)
 
 def __lldb_init_module(debugger, internal_dict):
-    debugger.HandleCommand('command script add -f lldbpeda.reverse rvs')
-    debugger.HandleCommand('command script add -f lldbpeda.continue_with_regs cr')
+    debugger.HandleCommand('command script add -f lldbpeda.continue_with_regs c')
     debugger.HandleCommand('command script add -f lldbpeda.next_with_info n')
     debugger.HandleCommand('command script add -f lldbpeda.step_with_info s')
     debugger.HandleCommand('command script add -f lldbpeda.ni_with_info ni')
     debugger.HandleCommand('command script add -f lldbpeda.si_with_info si')
-    debugger.HandleCommand('command script add -f lldbpeda.show_regs regs')
+    debugger.HandleCommand('command script add -f lldbpeda.show_regs reg')
     debugger.HandleCommand('command script add -f lldbpeda.print_ptr ptr')
     debugger.HandleCommand('command script add -f lldbpeda.code code')
     debugger.HandleCommand('command script add -f lldbpeda.stack stack')
     debugger.HandleCommand('command script add -f lldbpeda.peda peda')
+    debugger.HandleCommand('command script add -f lldbpeda.reverse rvs')
