@@ -136,7 +136,7 @@ def print_ptr(debugger, command, result, internal_dict):
                     break
                 ptr2 = process.ReadPointerFromMemory(ptr1, error)
                 if not error.Success():
-                    print re.sub('[\x00-\x1f\x7f-\xff]', '.', struct.pack('Q', ptr1))      # replace unprintable chars with '.' and print
+                    print re.sub('[\x00-\x1f\x7f-\xff]', '.', struct.pack('Q', ptr1))      # replace invisible letters with '.' and print
                     break
                 else:
                     ptr1 = ptr1 + 8
@@ -146,6 +146,8 @@ def print_ptr(debugger, command, result, internal_dict):
                         print('   '),
                     hex_ptr = '0x%016x' % ptr2
                     print('\033[36m'+ hex_ptr +'\033[0m'),
+
+                    str_buf = ''
                     for k in range(8):
                         if ptr2 >= 2**64:
                             break
@@ -155,8 +157,12 @@ def print_ptr(debugger, command, result, internal_dict):
                             break
                         else:
                             ptr2 = ptr2 + 8
+                            str_buf = str_buf + struct.pack('Q', ptr3)
                             if k == 0: print('->>'),
                             print('0x%016x' % ptr3),
+                    str_re = re.match(r'^[\x20-\x7f]{3,}[\r\n\x00]', str_buf + '\x00')        # start with at lease 3 visible letters, end with \r \n or \x00
+                    if str_re != None:
+                        print(str_re.group()), 
                     print('')
 
 def code(debugger, command, result, internal_dict):
