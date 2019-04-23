@@ -61,19 +61,29 @@ def si_with_info(debugger, command, result, internal_dict):
     debugger.HandleCommand('thread step-inst')
     show_regs(debugger, command, result, internal_dict)
 
-def print_reg(process, register, ntimes):
+# def print_reg(process, register, ntimes):
+#     print("%13.13s" % ('\033[35m' + register.GetName() + "\033[0m ")),  # use format to print r8 and r9 pretty
+#     print('\033[36m' + register.GetValue() + '\033[0m' + ' '),
+#     addr = int(register.GetValue(), 16)
+
+#     error = lldb.SBError()
+#     for i in range(ntimes):
+#         if addr >= 2**64:
+#             break
+#         content = process.ReadMemory(addr, 8, error)
+#         addr = addr + 8
+#         if error.Success():
+#             print(binascii.hexlify(content[::-1])),  # use [::-1] to reverse string
+#     print('')
+
+def print_reg(target, register, ntimes):
+    process = target.GetProcess()
     print("%13.13s" % ('\033[35m' + register.GetName() + "\033[0m ")),  # use format to print r8 and r9 pretty
     print('\033[36m' + register.GetValue() + '\033[0m' + ' '),
     addr = int(register.GetValue(), 16)
 
-    error = lldb.SBError()
-    for i in range(ntimes):
-        if addr >= 2**64:
-            break
-        content = process.ReadMemory(addr, 8, error)
-        addr = addr + 8
-        if error.Success():
-            print(binascii.hexlify(content[::-1])),  # use [::-1] to reverse string
+# print pointed content description in one line
+    show_pointed(target, addr, ntimes)
     print('')
 
 def show_regs(debugger, command, result, internal_dict):
@@ -111,9 +121,48 @@ def show_regs(debugger, command, result, internal_dict):
                     print('\033[92mrflags \033[0m: ' +child.GetValue().replace("000000000000", "") + ' (' + " | ".join(flags_peda) + '\033[0m)')
                 else:
                     # import pdb; pdb.set_trace()
-                    print_reg(process, child, 8)
+                    print_reg(target, child, 8)
 
-def print_ptr(debugger, command, result, internal_dict):
+def get_addr_description(target, addr):
+    so_addr = target.ResolveLoadAddress(addr)
+    if so_addr.GetModule().IsValid():
+        return str(so_addr), str(so_addr.GetSection())[40:]
+    else:
+        return
+
+# print pointed content description in one line
+def show_pointed(target, addr, ntimes):
+    process = target.GetProcess()
+    error = lldb.SBError()
+    str_buf = ''
+
+    addr_desc = get_addr_description(target, addr)
+    if addr_desc == None:
+        addr_desc = ''
+    else:
+        if '__TEXT' in addr_desc[1]:
+            ntimes = 0
+        addr_desc = addr_desc[0] + ' IN ' + addr_desc[1]
+            
+    for k in range(ntimes):
+        if addr >= 2**64:
+            break
+        ptr = process.ReadPointerFromMemory(addr, error)
+        if not error.Success():
+            print re.sub('[^\x20-\x7e]', '.', struct.pack('Q', addr)),
+            break
+        else:
+            str_buf = str_buf + struct.pack('Q', ptr)
+            if k == 0: print('->>'),
+            print('0x%016x' % ptr),
+        addr = addr + 8
+
+    str_re = re.match(r'^[\x20-\x7f]{3,}[\r\n\x00]', str_buf + '\x00')       # start with at lease 3 visible letters, end with \r \n or \x00
+    if str_re != None:
+        print(str_re.group()),
+    print(addr_desc),
+
+def depict_ptr(debugger, command, result, internal_dict):
     target = debugger.GetSelectedTarget()
     process = target.GetProcess()
     # addr = int(command, 16)
@@ -131,6 +180,9 @@ def print_ptr(debugger, command, result, internal_dict):
         else:
             hex_ptr = '0x%016x' % ptr1
             print('\033[35m'+ hex_ptr +'\033[0m'),
+            addr_desc = get_addr_description(target, ptr1)
+            if addr_desc != None:
+                print(addr_desc[0] + ' IN ' + addr_desc[1]),
             for j in range(8):
                 if ptr1 >= 2**64:
                     break
@@ -139,30 +191,16 @@ def print_ptr(debugger, command, result, internal_dict):
                     print re.sub('[\x00-\x1f\x7f-\xff]', '.', struct.pack('Q', ptr1))      # replace invisible letters with '.' and print
                     break
                 else:
-                    ptr1 = ptr1 + 8
                     if j == 0:
                         print('\n-->'),
                     else:
                         print('   '),
+                    ptr1 = ptr1 + 8  # TODO: put this into right place
                     hex_ptr = '0x%016x' % ptr2
                     print('\033[36m'+ hex_ptr +'\033[0m'),
 
-                    str_buf = ''
-                    for k in range(8):
-                        if ptr2 >= 2**64:
-                            break
-                        ptr3 = process.ReadPointerFromMemory(ptr2, error)
-                        if not error.Success():
-                            print re.sub('[^\x20-\x7e]', '.', struct.pack('Q', ptr2)),
-                            break
-                        else:
-                            ptr2 = ptr2 + 8
-                            str_buf = str_buf + struct.pack('Q', ptr3)
-                            if k == 0: print('->>'),
-                            print('0x%016x' % ptr3),
-                    str_re = re.match(r'^[\x20-\x7f]{3,}[\r\n\x00]', str_buf + '\x00')        # start with at lease 3 visible letters, end with \r \n or \x00
-                    if str_re != None:
-                        print(str_re.group()), 
+                    # print pointed content description in one linele_info(target, ptr2)),
+                    show_pointed(target, ptr2, 8)
                     print('')
 
 def code(debugger, command, result, internal_dict):
@@ -191,7 +229,7 @@ def __lldb_init_module(debugger, internal_dict):
     debugger.HandleCommand('command script add -f lldbpeda.ni_with_info ni')
     debugger.HandleCommand('command script add -f lldbpeda.si_with_info si')
     debugger.HandleCommand('command script add -f lldbpeda.show_regs reg')
-    debugger.HandleCommand('command script add -f lldbpeda.print_ptr ptr')
+    debugger.HandleCommand('command script add -f lldbpeda.depict_ptr ptr')
     debugger.HandleCommand('command script add -f lldbpeda.code code')
     debugger.HandleCommand('command script add -f lldbpeda.stack stack')
     debugger.HandleCommand('command script add -f lldbpeda.peda peda')
